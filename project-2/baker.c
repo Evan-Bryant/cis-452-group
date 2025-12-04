@@ -1,5 +1,9 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <pthread.h>    
+#include <semaphore.h>  
+#include <time.h>       
+#include <unistd.h>     
 
 #define FLOUR 0
 #define SUGAR 1
@@ -27,12 +31,21 @@ typedef struct {
     int bowl;
     int spoon;
     int oven;
-}Kitchen; // Temporary? Might need to change this to work with semaphores idk
+} Kitchen;
+
+// Semaphores for each shared resource
+sem_t mixer_sem;
+sem_t pantry_sem;
+sem_t refrigerator_sem;
+sem_t bowl_sem;
+sem_t spoon_sem;
+sem_t oven_sem;
+
+int ramsiedBaker = -1;
 
 int findNum(int* lis, int num) {
     // returns the index of a recipe that hasn't been completed yet
 
-    // If the current selection hasn't been done yet
     if (lis[num] == 0) {
         return num;
     }
@@ -62,52 +75,23 @@ int findNum(int* lis, int num) {
     }
 }
 
-int main() {
-    // Temporary? Might need to change this to work with semaphores idk 
-    // Maybe a binary semaphore for pantry and oven
-    // and counting semaphores for the rest? i dont understand semaphores
-    Kitchen kitchen;
-    kitchen.mixer = 2;
-    kitchen.pantry = 1;
-    kitchen.refrigerator = 2;
-    kitchen.bowl = 3;
-    kitchen.spoon = 5;
-    kitchen.oven = 1;
+void* baker_thread(void* arg) {
+    int bakerId = *(int*)arg;
+    char bakerLetter = 'A' + bakerId; // A B C D E ...
 
-    // TODO: Setup shared memory
+    int todoList[] = { 0, 0, 0, 0, 0 }; // which recipes this baker has done
+    int nonpick, pick, grabbing, steps;
+    char* finishTxt;
+    int* recipe;
 
-
-    // user inputs number of bakers
-    int numBakers;
-    printf("Enter number of bakers: ");
-    scanf("%d", &numBakers);
-
-    // TOCULLEN: fork off processes, if odd the parent forks off the extra
-
-    // TOCULLEN: assign each baker a letter
-
-    // TOCULLEN: give each baker a different color text in terminal
-
-    // TOCULLEN: assign one baker a chance to have to start over
-
-    // TOCULLEN: if chance met for restart, reset todoList
-
-
-    // actual baker
-    int todoList[] = { 0, 0, 0, 0, 0 }; // a binary list of which recipes the chef has/has not done
-    int nonpick, // a temporary variable containing the raw random value generated
-        pick, // the sanitised value after being put through findNum()
-        grabbing, // the ingredient the baker currently needs
-        steps; // how many steps the current recipe has
-    char* finishTxt; // The text containing what recipe is currently being cooked
-    int* recipe; // a pointer to the list containing the current recipe
+    srand((unsigned int)(time(NULL) + bakerId * 123));
 
     while (1) {
-        srand(numBakers); // seeds random function with the number of bakers to get a consistent result while testing
         nonpick = rand() % 5;
-        pick = findNum(todoList, nonpick); // sanitises the random number, returns -1 if every recipe has been done
+        pick = findNum(todoList, nonpick); // -1 if every recipe has been done
+
         if (pick == -1) {
-            printf("Baker _ is done baking everything!\n");
+            printf("Baker %c is done baking everything!\n", bakerLetter);
             break;
         }
         else if (pick == 0) { // Cookies
@@ -134,51 +118,141 @@ int main() {
             recipe = pretzels;
             steps = 6;
         }
-        else if (pick == 4) { // Rolls
+        else {              // Rolls
             todoList[4] = 1;
             finishTxt = "Cinnamon Rolls";
             recipe = rolls;
             steps = 4;
         }
-        printf("Baker _ started making %s\n", finishTxt);
+
+        printf("Baker %c started making %s\n", bakerLetter, finishTxt);
+
+        // ingerdients 
         for (int i = 0; i < steps; i++) {
             grabbing = recipe[i];
-            printf("Baker _ is grabbing %s\n", ingredients[grabbing]);
+
             if (grabbing < 6) {
-                // TODO: Check to see if pantry is available
-
-                // TODO: Use pantry if available
-
+                // Pantry ingredient
+                sem_wait(&pantry_sem);  // only one baker in pantry at a time
+                printf("Baker %c is in the pantry grabbing %s\n",
+                       bakerLetter, ingredients[grabbing]);
+                usleep(10000);
+                sem_post(&pantry_sem);
             }
             else {
-                // TODO: Check to see if fridge is available
-
-                // TODO: Use fridge if available
+                // Refrigerator ingredient
+                sem_wait(&refrigerator_sem); // at most 2 bakers in fridge area
+                printf("Baker %c is at the refrigerator grabbing %s\n",
+                       bakerLetter, ingredients[grabbing]);
+                usleep(10000);
+                sem_post(&refrigerator_sem);
             }
         }
-        // Grab the mixer, bowl, and spoon (in that order)
-        printf("Baker _ is grabbing a mixer.\n");
-        // TODO: Check if a mixer is available
-        // TODO: Use mixer if available
 
-        printf("Baker _ is grabbing a bowl.\n");
-        // TODO: Check if a bowl is available
-        // TODO: Use bowl if available
+        // grab mixer, bowl, spoon
+        printf("Baker %c is grabbing a mixer.\n", bakerLetter);
+        sem_wait(&mixer_sem);
 
-        printf("Baker _ is grabbing a spoon.\n");
-        // TODO: Check if a spoon is available
-        // TODO: Use spoon if available
+        printf("Baker %c is grabbing a bowl.\n", bakerLetter);
+        sem_wait(&bowl_sem);
 
-        // Put mixer, bowl, and spoon back
-        printf("Baker _ is putting back the mixer, bowl, and spoon.\n");
-        // TODO: release the mixer, spoon, and bowl
+        printf("Baker %c is grabbing a spoon.\n", bakerLetter);
+        sem_wait(&spoon_sem);
 
-        // Put in Oven
-        printf("Baker _ is putting the %s in the oven.\n", finishTxt);
-        // TODO: Check if oven is available 
-        // TODO: Use oven if available
+        // mixing
+        printf("Baker %c is mixing the batter/dough.\n", bakerLetter);
+        usleep(20000);
 
+        printf("Baker %c is putting back the mixer, bowl, and spoon.\n",
+               bakerLetter);
+        sem_post(&spoon_sem);
+        sem_post(&bowl_sem);
+        sem_post(&mixer_sem);
 
-        printf("Baker _ finished making %s\n", finishTxt);
+        // oven
+        printf("Baker %c is putting the %s in the oven.\n",
+               bakerLetter, finishTxt);
+        sem_wait(&oven_sem);
+        // baking
+        usleep(30000);
+        sem_post(&oven_sem);
+
+        printf("Baker %c finished making %s\n", bakerLetter, finishTxt);
+
+        if (bakerId == ramsiedBaker) {
+            int chance = rand() % 100; 
+            if (chance < 15) { 
+                printf("Baker %c has been RAMSIED and must start over!\n",
+                       bakerLetter);
+                for (int i = 0; i < 5; i++) {
+                    todoList[i] = 0;
+                }
+            }
+        }
     }
+
+    return NULL;
+}
+
+int main() {
+    Kitchen kitchen;
+    kitchen.mixer = 2;
+    kitchen.pantry = 1;
+    kitchen.refrigerator = 2;
+    kitchen.bowl = 3;
+    kitchen.spoon = 5;
+    kitchen.oven = 1;
+
+    int numBakers;
+    printf("Enter number of bakers: ");
+    scanf("%d", &numBakers);
+
+    if (numBakers <= 0) {
+        printf("Need at least 1 baker.\n");
+        return 1;
+    }
+
+    // Ramsied baker selection
+    srand((unsigned int)time(NULL));
+    ramsiedBaker = rand() % numBakers;
+
+    printf("Baker %c has been chosen as the potential RAMSIED baker.\n",
+           'A' + ramsiedBaker);
+
+    // Initialize semaphores
+    sem_init(&mixer_sem,        0, kitchen.mixer);
+    sem_init(&pantry_sem,       0, kitchen.pantry);
+    sem_init(&refrigerator_sem, 0, kitchen.refrigerator);
+    sem_init(&bowl_sem,         0, kitchen.bowl);
+    sem_init(&spoon_sem,        0, kitchen.spoon);
+    sem_init(&oven_sem,         0, kitchen.oven);
+
+    // Create one thread per baker
+    pthread_t* threads = malloc(sizeof(pthread_t) * numBakers);
+    int* ids = malloc(sizeof(int) * numBakers);
+
+    for (int i = 0; i < numBakers; i++) {
+        ids[i] = i;
+        if (pthread_create(&threads[i], NULL, baker_thread, &ids[i]) != 0) {
+            perror("pthread_create failed");
+        }
+    }
+
+    // Wait for all bakers to finish
+    for (int i = 0; i < numBakers; i++) {
+        pthread_join(threads[i], NULL);
+    }
+
+    // Clean up
+    sem_destroy(&mixer_sem);
+    sem_destroy(&pantry_sem);
+    sem_destroy(&refrigerator_sem);
+    sem_destroy(&bowl_sem);
+    sem_destroy(&spoon_sem);
+    sem_destroy(&oven_sem);
+
+    free(threads);
+    free(ids);
+
+    return 0;
 }

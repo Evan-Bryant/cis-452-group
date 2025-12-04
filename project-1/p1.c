@@ -49,6 +49,8 @@ int main() {
         printf("Created pipe from Node %d to Node %d.\n", i, next);
     }
 
+    
+
     for (int i = 1; i < totalNodes; i++) {
         pid_t pid = fork();
         if (pid < 0) {
